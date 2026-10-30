@@ -173,6 +173,7 @@ select.field { padding-right: 6px; }
 .log-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-cell { color: var(--text-2); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .log-cell.date { text-align: right; }
+.pl-edit { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; padding: 12px 0; flex: 1; }
 .log-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.12s; }
 .log-row:hover .log-actions, .log-row:focus-within .log-actions { opacity: 1; }
 .log-edit { display: grid; grid-template-columns: 1fr 160px 160px auto auto; gap: 8px; padding: 12px 0; flex: 1; }
@@ -247,8 +248,8 @@ select.field { padding-right: 6px; }
 .progress > div { height: 100%; background: var(--text); width: 0; transition: width 0.2s linear; }
 .progress-line { display: flex; justify-content: space-between; color: var(--text-2); margin: 8px 0 0; font-variant-numeric: tabular-nums; }
 
-/* ---------- 作業画面 ---------- */
-#work {
+/* ---------- 作業画面・プレイリスト画面 ---------- */
+#work, #plView {
   position: fixed;
   inset: 0;
   display: grid;
@@ -355,6 +356,20 @@ body.resizing, body.resizing * { cursor: row-resize !important; }
 @keyframes flash { from { background: color-mix(in srgb, var(--team) 22%, var(--surface)); } to { background: transparent; } }
 .list-empty { color: var(--text-2); padding: 22px 16px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
+/* プレイリスト画面の一覧 */
+.row.pl-row { grid-template-columns: 4px 26px 34px minmax(110px, 1fr) 168px minmax(150px, 1.4fr) minmax(100px, 1fr) 40px; cursor: default; }
+.pl-row .handle { color: var(--text-3); display: flex; align-items: center; justify-content: center; cursor: grab; }
+.pl-row .num { color: var(--text-3); text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
+.pl-row.playing .num { color: var(--text); font-weight: 600; }
+.pl-row .game { color: var(--text-2); }
+.pl-row.missing .title, .pl-row.missing .times, .pl-row.missing .game { color: var(--text-3); }
+.pl-row .note { color: var(--rec); font-size: 12px; }
+.pl-row .pl-remove { opacity: 0; }
+.pl-row:hover .pl-remove, .pl-row.selected .pl-remove, .pl-row .pl-remove:focus-visible { opacity: 1; }
+.pl-row.drop-before { box-shadow: inset 0 2px 0 var(--focus); }
+.pl-title { font-weight: 600; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pl-pos { min-width: 64px; text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; padding-right: 6px; }
+
 /* ---------- 重ねて出すもの ---------- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.36); display: flex; align-items: center; justify-content: center; z-index: 40; }
 .sheet {
@@ -399,6 +414,11 @@ body.resizing, body.resizing * { cursor: row-resize !important; }
 .pop-item:hover { background: var(--surface-2); }
 .pop-item .tick { width: 14px; color: var(--text); }
 .pop-item .team-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pop-item .pop-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pop-head { color: var(--text-2); font-size: 12px; padding: 6px 10px 4px; }
+.pop-sep { height: 1px; background: var(--line-soft); margin: 4px 6px; }
+.pop-form { display: flex; gap: 6px; padding: 6px; width: 320px; }
+.pop-form .field { flex: 1; min-width: 0; }
 
 .toast {
   position: fixed;

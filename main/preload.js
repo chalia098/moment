@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('moment', {
   exportLog: id => ipcRenderer.invoke('logs:export', id),
   importLog: () => ipcRenderer.invoke('logs:import'),
 
+  listPlaylists: () => ipcRenderer.invoke('playlists:list'),
+  getPlaylist: id => ipcRenderer.invoke('playlists:get', id),
+  savePlaylist: pl => ipcRenderer.invoke('playlists:save', pl),
+  deletePlaylist: (id, name) => ipcRenderer.invoke('playlists:delete', id, name),
+
   chooseVideo: message => ipcRenderer.invoke('video:choose', message),
   chooseVideos: () => ipcRenderer.invoke('video:chooseMany'),
   inspectVideo: p => ipcRenderer.invoke('video:inspect', p),
@@ -35,6 +40,7 @@ contextBridge.exposeInMainWorld('moment', {
   saveVideoAs: defaultName => ipcRenderer.invoke('dialog:saveVideo', defaultName),
 
   startExport: opts => ipcRenderer.invoke('export:start', opts),
+  startPlaylistExport: opts => ipcRenderer.invoke('export:playlist', opts),
   startMerge: opts => ipcRenderer.invoke('merge:start', opts),
   cancelJob: () => ipcRenderer.invoke('job:cancel'),
   openFolder: dir => ipcRenderer.invoke('shell:openFolder', dir),

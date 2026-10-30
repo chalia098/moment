@@ -280,13 +280,81 @@ function cutArgs(input, start, end, quality, enc, out) {
   ];
 }
 
+// 違う動画同士をつなぐときの大きさ。1080p・720p は決まった大きさ、元の解像度は最初の動画に合わせる（偶数にそろえる）
+function fitSize(quality, video) {
+  if (quality === '1080p') return { W: 1920, H: 1080 };
+  if (quality === '720p') return { W: 1280, H: 720 };
+  const even = n => Math.max(2, Math.floor(n / 2) * 2);
+  return video && video.width && video.height ? { W: even(video.width), H: even(video.height) } : { W: 1920, H: 1080 };
+}
+
+// 縦横比を保って大きさをそろえ、余白は黒で埋める
+function fitFilter(W, H) {
+  return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+}
+
+// 大きさ・コマ数・音声（48kHz ステレオ。音声のない動画は無音）をそろえて切り出す
+function fitArgs(input, start, end, size, fps, hasAudio, enc, out) {
+  const len = Math.max(0.05, end - start).toFixed(3);
+  const args = ['-ss', start.toFixed(3), '-i', input];
+  if (!hasAudio) args.push('-f', 'lavfi', '-t', len, '-i', 'anullsrc=r=48000:cl=stereo');
+  return args.concat([
+    '-t', len, '-map', '0:v:0', '-map', hasAudio ? '0:a:0' : '1:a:0', '-sn', '-dn',
+    '-vf', fitFilter(size.W, size.H), '-r', String(fps), ...enc, ...AUDIO_ARGS, '-ar', '48000', '-ac', '2',
+    '-movflags', '+faststart', '-n', out
+  ]);
+}
+
 // ---------- シーンの書き出し ----------
 // opts: {input, dest, gameName, quality, mode:'separate'|'merged', mergedTitle, items:[{id,title,start,end}]}
 async function exportScenes(job, opts, emit) {
   const items = opts.items.slice().sort((a, b) => a.start - b.start);
-  let enc;
+  return exportItems(job, {
+    dest: opts.dest,
+    folder: opts.gameName || 'Moment',
+    mode: opts.mode,
+    items,
+    mergedName: `${core.sanitizeFileName(opts.mergedTitle || opts.gameName || 'まとめ')}.mp4`,
+    names: () => core.planFileNames(items),
+    prepare: async enc => (it, out) => cutArgs(opts.input, it.start, it.end, opts.quality, enc, out)
+  }, emit);
+}
+
+// プレイリストのダウンロード。シーンごとに元の動画が違ってよく、プレイリストの順のまま書き出す。
+// opts: {dest, name, quality, mode:'separate'|'merged', mergedTitle, items:[{id, input, title, start, end}]}
+async function exportPlaylist(job, opts, emit) {
+  const items = opts.items.slice();
+  return exportItems(job, {
+    dest: opts.dest,
+    folder: opts.name || 'プレイリスト',
+    mode: opts.mode,
+    items,
+    mergedName: `${core.sanitizeFileName(opts.mergedTitle || opts.name || 'プレイリスト')}.mp4`,
+    names: () => core.playlistFileNames(items),
+    prepare: async enc => {
+      const inputs = [...new Set(items.map(it => it.input))];
+      if (opts.mode !== 'merged' || inputs.length < 2) return (it, out) => cutArgs(it.input, it.start, it.end, opts.quality, enc, out);
+      // 違う動画をつなぐので、映像の大きさ・コマ数・音声をそろえる。大きさとコマ数は最初のシーンの動画に合わせる
+      const infos = new Map();
+      for (const p of inputs) {
+        const info = await probe(p, { job });
+        if (info.error === 'cancelled') throw Object.assign(new Error(info.reason), { cancelled: true });
+        if (!info.ok) throw new Error(info.error === 'parse' ? `${path.basename(p)} を読み込めません` : info.reason);
+        infos.set(p, info);
+      }
+      const first = infos.get(items[0].input).video;
+      const size = fitSize(opts.quality, first);
+      const fps = Math.round((first.fps || 30) * 1000) / 1000;
+      return (it, out) => fitArgs(it.input, it.start, it.end, size, fps, !!infos.get(it.input).audio, enc, out);
+    }
+  }, emit);
+}
+
+// 書き出しの共通の流れ。plan: {dest, folder, mode, items, mergedName, names(), prepare(enc) → argsFor(it, out)}
+async function exportItems(job, plan, emit) {
+  let argsFor;
   try {
-    enc = await videoEncoderArgs({ job });
+    argsFor = await plan.prepare(await videoEncoderArgs({ job }));
   } catch (err) {
     if (err.cancelled) return { dir: null, results: [], cancelled: true };
     throw err;
@@ -294,31 +362,32 @@ async function exportScenes(job, opts, emit) {
   let dir = null;
   let work;
   try {
-    dir = await newDir(opts.dest, core.sanitizeFileName(opts.gameName || 'Moment'));
+    dir = await newDir(plan.dest, core.sanitizeFileName(plan.folder));
     work = await makeWorkDir(dir);
   } catch (err) {
     if (dir) await fsp.rmdir(dir).catch(() => {}); // この処理が作った空のフォルダだけ
     throw new Error(fsReason(err));
   }
   try {
-    const run1 = opts.mode === 'merged' ? exportMerged : exportSeparate;
-    return await run1(job, opts, items, dir, work, enc, emit);
+    const run1 = plan.mode === 'merged' ? exportMerged : exportSeparate;
+    return await run1(job, plan, argsFor, dir, work, emit);
   } finally {
     await fsp.rm(work, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function exportMerged(job, opts, items, dir, work, enc, emit) {
+async function exportMerged(job, plan, argsFor, dir, work, emit) {
+  const items = plan.items;
   const total = items.reduce((s, it) => s + (it.end - it.start), 0) || 1;
   let doneSec = 0;
   const results = [];
-  const name = `${core.sanitizeFileName(opts.mergedTitle || opts.gameName || 'まとめ')}.mp4`;
+  const name = plan.mergedName;
   const parts = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const part = path.join(work, `part-${String(i).padStart(4, '0')}.mp4`);
     emit({ type: 'progress', fraction: doneSec / total, done: i, total: items.length, current: name });
-    const r = await run(job, cutArgs(opts.input, it.start, it.end, opts.quality, enc, part), it.end - it.start,
+    const r = await run(job, argsFor(it, part), it.end - it.start,
       f => emit({ type: 'progress', fraction: (doneSec + f * (it.end - it.start)) / total, done: i, total: items.length, current: name }));
     if (!r.ok) {
       results.push({ file: name, ok: false, reason: r.reason });
@@ -339,17 +408,18 @@ async function exportMerged(job, opts, items, dir, work, enc, emit) {
   return { dir, results, cancelled: !!r.cancelled };
 }
 
-async function exportSeparate(job, opts, items, dir, work, enc, emit) {
+async function exportSeparate(job, plan, argsFor, dir, work, emit) {
+  const items = plan.items;
   const total = items.reduce((s, it) => s + (it.end - it.start), 0) || 1;
   let doneSec = 0;
   const results = [];
-  const names = core.planFileNames(items);
+  const names = plan.names();
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
     const name = names.get(it.id);
     const tmp = path.join(work, `${String(i).padStart(4, '0')}.mp4`);
     emit({ type: 'progress', fraction: doneSec / total, done: i, total: items.length, current: name });
-    const r = await run(job, cutArgs(opts.input, it.start, it.end, opts.quality, enc, tmp), it.end - it.start,
+    const r = await run(job, argsFor(it, tmp), it.end - it.start,
       f => emit({ type: 'progress', fraction: (doneSec + f * (it.end - it.start)) / total, done: i, total: items.length, current: name }));
     doneSec += it.end - it.start;
     if (r.cancelled) return { dir, results, cancelled: true };
@@ -418,7 +488,7 @@ async function mergeVideos(job, opts, emit) {
         if (!info.audio) args.push('-f', 'lavfi', '-t', String(info.duration), '-i', 'anullsrc=r=48000:cl=stereo');
         args.push(
           '-map', '0:v:0', '-map', info.audio ? '0:a:0' : '1:a:0', '-sn', '-dn',
-          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
+          '-vf', fitFilter(W, H),
           '-r', String(fps), ...enc, ...AUDIO_ARGS, '-ar', '48000', '-ac', '2', '-shortest', '-n', part);
         const r = await run(job, args, info.duration, f => emit({ type: 'progress', fraction: (doneSec + f * info.duration) / total }));
         if (!r.ok) return { ok: false, cancelled: !!r.cancelled, reason: r.reason };
@@ -442,4 +512,4 @@ async function mergeVideos(job, opts, emit) {
   }
 }
 
-module.exports = { resolveFfmpeg, probe, videoEncoderArgs, Job, exportScenes, mergeVideos, sameFormat };
+module.exports = { resolveFfmpeg, probe, videoEncoderArgs, Job, exportScenes, exportPlaylist, mergeVideos, sameFormat };

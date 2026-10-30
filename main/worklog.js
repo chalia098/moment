@@ -190,4 +190,4 @@ function checkImport(data, newId) {
   return log;
 }
 
-module.exports = { VERSION, LIMITS, DURATION_SLACK, LogError, checkLog, checkImport, checkShortcutList };
+module.exports = { VERSION, LIMITS, DURATION_SLACK, LogError, checkLog, checkImport, checkShortcutList, isId, isObject, text };

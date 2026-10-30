@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const core = require('../src/lib/core.js');
 const worklog = require('./worklog');
+const playlist = require('./playlist');
 
 const CHUNK = 1024 * 1024; // 指紋に使う1か所あたりの大きさ（1MB）
 
@@ -12,10 +13,12 @@ class Store {
   constructor(baseDir) {
     this.baseDir = baseDir;
     this.logDir = path.join(baseDir, 'worklogs');
+    this.playlistDir = path.join(baseDir, 'playlists');
     this.settingsFile = path.join(baseDir, 'settings.json');
     this.windowFile = path.join(baseDir, 'window.json');
     this.writing = new Map(); // 保存先ごとの書き込みの列（最後に受け付けた書き込み）
     fs.mkdirSync(this.logDir, { recursive: true });
+    fs.mkdirSync(this.playlistDir, { recursive: true });
   }
 
   // ---------- 書き込み ----------
@@ -164,6 +167,61 @@ class Store {
     const log = worklog.checkImport(data, () => crypto.randomUUID());
     const exists = fs.existsSync(this.logPath(log.id));
     return { log, exists };
+  }
+
+  // ---------- プレイリスト ----------
+  playlistPath(id) {
+    if (!/^[A-Za-z0-9-]+$/.test(id)) throw new Error('invalid id');
+    return path.join(this.playlistDir, `${id}.json`);
+  }
+
+  // 一覧には本数と合計の長さも出す。中のシーンは作業ログから引き、見つからないものは長さに数えない。
+  // 中身が正しくないプレイリストも名前だけ出し（broken）、開くときに知らせる
+  async listPlaylists() {
+    const names = await fsp.readdir(this.playlistDir).catch(() => []);
+    const logs = new Map();
+    const sceneOf = async it => {
+      if (!logs.has(it.logId)) logs.set(it.logId, await this.getLog(it.logId).catch(() => null));
+      const log = logs.get(it.logId);
+      return log && log.scenes.find(s => s.id === it.sceneId);
+    };
+    const out = [];
+    for (const n of names) {
+      if (!n.endsWith('.json')) continue;
+      const raw = this.readJsonSync(path.join(this.playlistDir, n));
+      if (!raw || typeof raw.id !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(raw.id)) continue;
+      let pl;
+      try { pl = playlist.checkPlaylist(raw); } catch {
+        out.push({ id: raw.id, name: typeof raw.name === 'string' ? raw.name.slice(0, playlist.LIMITS.name) : '', broken: true, itemCount: 0, totalSec: 0, updatedAt: '' });
+        continue;
+      }
+      let totalSec = 0;
+      for (const it of pl.items) {
+        const s = await sceneOf(it);
+        if (s) totalSec += s.end - s.start;
+      }
+      out.push({ id: pl.id, name: pl.name, broken: false, itemCount: pl.items.length, totalSec, updatedAt: pl.updatedAt });
+    }
+    return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
+  // 中身が正しくないプレイリストは開かない（null）
+  async getPlaylist(id) {
+    const raw = this.readJsonSync(this.playlistPath(id));
+    if (!raw) return null;
+    try { return playlist.checkPlaylist(raw); } catch { return null; }
+  }
+
+  // 確かめた項目だけで作り直して保存する。正しくなければ LogError を投げ、何も書かない
+  async savePlaylist(input) {
+    const pl = playlist.checkPlaylist(input);
+    pl.updatedAt = new Date().toISOString();
+    await this.writeJson(this.playlistPath(pl.id), pl);
+    return pl.updatedAt;
+  }
+
+  async deletePlaylist(id) {
+    await fsp.rm(this.playlistPath(id), { force: true });
   }
 }
 

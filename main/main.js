@@ -224,7 +224,7 @@ function registerIpc() {
   ipcMain.handle('logs:delete', async (_e, id, name) => {
     const r = await dialog.showMessageBox(mainWin, {
       type: 'warning', buttons: ['削除する', 'キャンセル'], defaultId: 1, cancelId: 1,
-      message: `「${name || '作業ログ'}」を削除しますか？`, detail: 'この試合のタグがすべて消えます。動画ファイルは消えません。'
+      message: `「${name || '作業ログ'}」を削除しますか？`, detail: 'この試合のタグがすべて消えます。動画ファイルは消えません。\nプレイリストに入れたこの試合のシーンも、再生できなくなります。'
     });
     if (r.response !== 0) return false;
     await store.deleteLog(id);
@@ -264,6 +264,21 @@ function registerIpc() {
     } catch {
       return { ok: false, reason: '作業ログを保存できませんでした' };
     }
+  });
+
+  ipcMain.handle('playlists:list', () => store.listPlaylists());
+  ipcMain.handle('playlists:get', (_e, id) => store.getPlaylist(id));
+  ipcMain.handle('playlists:save', async (_e, pl) => {
+    try { return { ok: true, updatedAt: await store.savePlaylist(pl) }; } catch (err) { return { ok: false, reason: err.message }; }
+  });
+  ipcMain.handle('playlists:delete', async (_e, id, name) => {
+    const r = await dialog.showMessageBox(mainWin, {
+      type: 'warning', buttons: ['削除する', 'キャンセル'], defaultId: 1, cancelId: 1,
+      message: `「${name || 'プレイリスト'}」を削除しますか？`, detail: 'プレイリストだけが消えます。中のシーン（作業ログ）と動画ファイルは消えません。'
+    });
+    if (r.response !== 0) return false;
+    await store.deletePlaylist(id);
+    return true;
   });
 
   ipcMain.handle('video:choose', async (_e, message) => {
@@ -307,6 +322,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('export:start', (e, opts) => runJob(e, (j, emit) => media.exportScenes(j, opts, emit).then(summary => ({ ok: true, ...summary }))));
+  ipcMain.handle('export:playlist', (e, opts) => runJob(e, (j, emit) => media.exportPlaylist(j, opts, emit).then(summary => ({ ok: true, ...summary }))));
   ipcMain.handle('merge:start', (e, opts) => runJob(e, (j, emit) => media.mergeVideos(j, opts, emit)));
   ipcMain.handle('job:cancel', () => { if (job) job.cancel(); return true; });
   ipcMain.handle('shell:openFolder', (_e, dir) => shell.openPath(dir));

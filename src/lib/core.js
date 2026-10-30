@@ -126,6 +126,16 @@
     return out;
   }
 
+  // プレイリストのダウンロード：プレイリストの順に番号を前に付ける（番号で並び、名前も重ならない）。100本以上なら3桁。
+  // items: [{id, title}]（プレイリストの順）→ Map(id → "01 タイトル.mp4")
+  function playlistFileNames(items, ext) {
+    const extension = ext || '.mp4';
+    const width = items.length >= 100 ? 3 : 2;
+    const out = new Map();
+    items.forEach((it, i) => out.set(it.id, `${String(i + 1).padStart(width, '0')} ${sanitizeFileName(it.title || 'タイトルなし')}${extension}`));
+    return out;
+  }
+
   // ---------- キー ----------
   const CODE_LABELS = {
     Comma: '、', Period: '。', Space: 'Space', Enter: 'Enter', Tab: 'Tab', Escape: 'Esc',
@@ -273,7 +283,7 @@
   return {
     SPEEDS, SEEK_STEP, SORTS, BASE_ACTIONS,
     formatTime, formatTimeShort, parseTime, teamName, resolveShortcut, autoTitle, sceneTitle, sceneTeam,
-    sanitizeFileName, fileNameKey, planFileNames, codeLabel, keyLabel, comboFromEvent, sameCombo, keyProblem,
+    sanitizeFileName, fileNameKey, planFileNames, playlistFileNames, codeLabel, keyLabel, comboFromEvent, sameCombo, keyProblem,
     defaultSettings, sortScenes, filterScenes, sameDuration, MODIFIER_CODES
   };
 });

@@ -15,7 +15,7 @@ fs.writeFileSync(video, 'video');
 
 // 止まる ffmpeg を時間切れにするまでの長さ。偽の ffmpeg が起動して自分の番号を書くまで待てる長さにする
 const HANG_TIMEOUT_MS = 2000;
-const FAKE_KEYS = ['FAKE_FF_STATE', 'FAKE_FF_PIDFILE', 'FAKE_FF_PROBE', 'FAKE_FF_ENCODERS', 'FAKE_FF_FAIL_AT', 'FAKE_FF_HANG_AT', 'FAKE_FF_TOUCH', 'FAKE_FF_TOUCH_AT'];
+const FAKE_KEYS = ['FAKE_FF_STATE', 'FAKE_FF_PIDFILE', 'FAKE_FF_PROBE', 'FAKE_FF_ENCODERS', 'FAKE_FF_FAIL_AT', 'FAKE_FF_HANG_AT', 'FAKE_FF_TOUCH', 'FAKE_FF_TOUCH_AT', 'FAKE_FF_ARGS', 'FAKE_FF_NOAUDIO'];
 test.afterEach(() => { for (const k of FAKE_KEYS) delete process.env[k]; });
 test.after(() => removeTmpRoot(root));
 
@@ -196,6 +196,58 @@ test('1本に結合してダウンロード：選んだ行を時刻順につな�
   assert.deepStrictEqual(r.results.map(x => [x.file, x.ok]), [['まとめ.mp4', true]]);
   assert.strictEqual(read(path.join(r.dir, 'まとめ.mp4')), 'cut:1;cut:2;');
   assert.deepStrictEqual(listAll(r.dir), ['まとめ.mp4']);
+});
+
+// プレイリスト：シーンごとに元の動画が違う
+const video2 = path.join(root, 'game2.mp4');
+fs.writeFileSync(video2, 'video2');
+const cutCalls = () => read(process.env.FAKE_FF_ARGS).split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(a => !a.includes('concat'));
+const inputOf = a => a[a.indexOf('-i') + 1];
+function playlistOpts(dest, extra = {}) {
+  return {
+    dest, name: '渡辺組 FB', quality: 'source', mode: 'separate',
+    items: [
+      { id: 'log-2/s-9', input: video2, title: '渡辺組 FB', start: 30, end: 35 },
+      { id: 'log-1/s-1', input: video, title: '順天堂 setOF 6:5', start: 5, end: 8 },
+      { id: 'log-1/s-2', input: video, title: '', start: 1, end: 2 }
+    ],
+    ...extra
+  };
+}
+
+test('プレイリストのダウンロード：プレイリスト名のフォルダに、順番の番号付きの名前で、それぞれの元の動画から切り出す', async () => {
+  const dest = setup('pl-separate', { FAKE_FF_ARGS: path.join(root, 'pl-separate.args') });
+  const r = await media.exportPlaylist(new media.Job(), playlistOpts(dest), () => {});
+  assert.strictEqual(r.dir, path.join(dest, '渡辺組 FB'));
+  assert.deepStrictEqual(r.results.map(x => [x.file, x.ok]), [['01 渡辺組 FB.mp4', true], ['02 順天堂 setOF 6-5.mp4', true], ['03 タイトルなし.mp4', true]]);
+  assert.deepStrictEqual(listAll(r.dir), ['01 渡辺組 FB.mp4', '02 順天堂 setOF 6-5.mp4', '03 タイトルなし.mp4']);
+  assert.deepStrictEqual(cutCalls().map(inputOf), [video2, video, video]);
+});
+
+test('プレイリストを1本に結合：違う動画同士は大きさと音声をそろえ、プレイリストの順につなぐ', async () => {
+  const dest = setup('pl-merged', { FAKE_FF_ARGS: path.join(root, 'pl-merged.args'), FAKE_FF_NOAUDIO: 'game2.mp4' });
+  const r = await media.exportPlaylist(new media.Job(), playlistOpts(dest, { mode: 'merged', mergedTitle: 'FB 集' }), () => {});
+  assert.deepStrictEqual(r.results.map(x => [x.file, x.ok]), [['FB 集.mp4', true]]);
+  assert.strictEqual(read(path.join(r.dir, 'FB 集.mp4')), 'cut:1;cut:2;cut:3;');
+  const calls = cutCalls();
+  assert.deepStrictEqual(calls.map(inputOf), [video2, video, video], 'プレイリストの順');
+  for (const a of calls) assert.ok(a[a.indexOf('-vf') + 1].includes('pad=1920:1080'), '最初の動画の大きさにそろえる');
+  assert.ok(calls[0].includes('anullsrc=r=48000:cl=stereo'), '音声のない動画は無音を足す');
+  assert.ok(!calls[1].includes('anullsrc=r=48000:cl=stereo'));
+  assert.deepStrictEqual(listAll(r.dir), ['FB 集.mp4']);
+});
+
+test('プレイリストを1本に結合：同じ動画だけなら大きさはそのまま。読み取れない動画があれば名前を出して止め、フォルダも作らない', async () => {
+  const dest = setup('pl-merged-one', { FAKE_FF_ARGS: path.join(root, 'pl-merged-one.args') });
+  const one = playlistOpts(dest, { mode: 'merged' });
+  one.items = one.items.filter(it => it.input === video);
+  const r = await media.exportPlaylist(new media.Job(), one, () => {});
+  assert.deepStrictEqual(r.results.map(x => [x.file, x.ok]), [['渡辺組 FB.mp4', true]]);
+  assert.ok(cutCalls().every(a => !a.includes('anullsrc=r=48000:cl=stereo')));
+
+  const dest2 = setup('pl-merged-bad', { FAKE_FF_PROBE: 'garbage' });
+  await assert.rejects(media.exportPlaylist(new media.Job(), playlistOpts(dest2, { mode: 'merged' }), () => {}), { message: 'game2.mp4 を読み込めません' });
+  assert.deepStrictEqual(listAll(dest2), []);
 });
 
 test('動画を結合：元のままでつなぎ、保存先に置く', async () => {

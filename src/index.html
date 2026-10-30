@@ -19,6 +19,9 @@
       <symbol id="i-pause" viewBox="0 0 20 20"><rect x="5.2" y="4.5" width="3.3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3.3" height="11" rx="1" fill="currentColor"/></symbol>
       <symbol id="i-keys" viewBox="0 0 20 20"><rect x="2.5" y="5.5" width="15" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 8.5h1M9.5 8.5h1M13.5 8.5h1M6.5 12h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
       <symbol id="i-drag" viewBox="0 0 20 20"><circle cx="7.5" cy="6" r="1.2" fill="currentColor"/><circle cx="12.5" cy="6" r="1.2" fill="currentColor"/><circle cx="7.5" cy="10" r="1.2" fill="currentColor"/><circle cx="12.5" cy="10" r="1.2" fill="currentColor"/><circle cx="7.5" cy="14" r="1.2" fill="currentColor"/><circle cx="12.5" cy="14" r="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-playlist" viewBox="0 0 20 20"><path d="M3.5 5.5h11M3.5 10h11M3.5 14.5h5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 12.2v5.1l4.3-2.55L12 12.2Z" fill="currentColor"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 20 20"><rect x="4.5" y="4.5" width="2" height="11" rx="0.8" fill="currentColor"/><path d="M15.5 4.5v11L7.5 10l8-5.5Z" fill="currentColor"/></symbol>
+      <symbol id="i-next" viewBox="0 0 20 20"><rect x="13.5" y="4.5" width="2" height="11" rx="0.8" fill="currentColor"/><path d="M4.5 4.5v11l8-5.5-8-5.5Z" fill="currentColor"/></symbol>
       <symbol id="i-x" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
@@ -30,6 +33,7 @@
       <button class="rail-item" data-pane="new"><svg><use href="#i-new"/></svg><span>新しく始める</span></button>
       <button class="rail-item" data-pane="merge"><svg><use href="#i-merge"/></svg><span>動画を結合</span></button>
       <button class="rail-item" data-pane="logs"><svg><use href="#i-log"/></svg><span>作業ログ</span></button>
+      <button class="rail-item" data-pane="playlists"><svg><use href="#i-playlist"/></svg><span>プレイリスト</span></button>
       <button class="rail-item" data-pane="settings"><svg><use href="#i-gear"/></svg><span>設定</span></button>
     </nav>
     <main class="pane-host">
@@ -50,6 +54,15 @@
         <header class="pane-head"><h1>動画を結合</h1></header>
         <p class="lead">前半・後半などに分かれた動画を、1本の動画にまとめます。</p>
         <div id="mergeBody"></div>
+      </section>
+
+      <section class="pane" id="pane-playlists" hidden>
+        <header class="pane-head">
+          <h1>プレイリスト</h1>
+          <button class="btn" id="newPlaylist">新しいプレイリスト</button>
+        </header>
+        <p class="lead">複数の試合から選んだシーンを、決めた順に続けて再生したり、ダウンロードしたりできます。</p>
+        <div id="plList" class="log-list"></div>
       </section>
 
       <section class="pane" id="pane-settings" hidden>
@@ -85,9 +98,38 @@
         <input type="search" id="memoSearch" placeholder="メモを検索" aria-label="メモを検索">
         <span class="spacer"></span>
         <span class="count" id="rowCount"></span>
+        <button class="btn" id="btnAddToPl" disabled>プレイリストに追加</button>
         <button class="btn primary" id="btnExport" disabled>ダウンロード</button>
       </div>
       <div class="rows" id="rows" role="list"></div>
+    </div>
+  </div>
+
+  <!-- プレイリスト画面 -->
+  <div id="plView" class="view" hidden>
+    <div class="stage">
+      <video id="plVideo" preload="auto" playsinline></video>
+      <div class="edge" id="plSplitter" role="separator" aria-orientation="horizontal" aria-label="映像と一覧の高さ"></div>
+    </div>
+    <div class="bar">
+      <button class="icon-btn" id="plBack" title="プレイリストに戻る" aria-label="プレイリストに戻る"><svg><use href="#i-playlist"/></svg></button>
+      <span class="bar-sep"></span>
+      <button class="icon-btn" id="plPrev" title="前のシーン" aria-label="前のシーン"><svg><use href="#i-prev"/></svg></button>
+      <button class="icon-btn play" id="plPlay" title="再生" aria-label="再生"><svg><use href="#i-play"/></svg></button>
+      <button class="icon-btn" id="plNext" title="次のシーン" aria-label="次のシーン"><svg><use href="#i-next"/></svg></button>
+      <button class="speed" id="plSpeed" title="速度" aria-haspopup="menu">1倍</button>
+      <span class="clock" id="plClock">00:00:000 / 00:00:000</span>
+      <div class="seek" id="plSeek" role="slider" aria-label="シーンの中の再生位置" tabindex="-1"><div class="seek-track"><div class="seek-fill" id="plSeekFill"></div></div><div class="seek-thumb" id="plSeekThumb"></div></div>
+      <span class="pl-pos" id="plPos"></span>
+    </div>
+    <div class="list">
+      <div class="list-head">
+        <span class="pl-title" id="plTitle"></span>
+        <span class="count" id="plCount"></span>
+        <span class="spacer"></span>
+        <button class="btn primary" id="plExport" disabled>ダウンロード</button>
+      </div>
+      <div class="rows" id="plRows" role="list"></div>
     </div>
   </div>
 

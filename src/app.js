@@ -30,7 +30,10 @@
     editing: null,
     flashId: null,
     capture: null,
-    sheet: null
+    sheet: null,
+    pls: [], // 起動画面のプレイリストの一覧
+    plNew: false,
+    pl: null // 開いているプレイリスト（プレイリスト画面）
   };
 
   // ---------- 小さな道具 ----------
@@ -102,10 +105,11 @@
   function listHeightFor(avail, ratio) {
     return Math.round(Math.max(MIN_LIST, Math.min(avail - MIN_VIDEO, ratio * avail)));
   }
+  // 作業画面とプレイリスト画面で同じ比率を使う
   function layoutList() {
-    const w = $('work');
+    const w = $(state.view === 'playlist' ? 'plView' : 'work');
     if (w.hidden) return;
-    const avail = w.clientHeight - $('bar').offsetHeight;
+    const avail = w.clientHeight - w.querySelector('.bar').offsetHeight;
     if (avail <= 0) return;
     w.style.setProperty('--list-h', `${listHeightFor(avail, state.settings.listRatio || DEFAULT_LIST_RATIO)}px`);
   }
@@ -137,6 +141,7 @@
 
   // ---------- 起動画面 ----------
   function showLauncher(pane) {
+    leavePlaylist();
     state.view = 'launcher';
     $('work').hidden = true;
     $('launcher').hidden = false;
@@ -147,8 +152,9 @@
   function selectPane(p) {
     state.pane = p;
     for (const b of document.querySelectorAll('.rail-item')) b.setAttribute('aria-current', b.dataset.pane === p ? 'page' : 'false');
-    for (const s of ['logs', 'new', 'merge', 'settings']) $(`pane-${s}`).hidden = s !== p;
+    for (const s of ['logs', 'new', 'merge', 'playlists', 'settings']) $(`pane-${s}`).hidden = s !== p;
     if (p === 'logs') refreshLogs();
+    if (p === 'playlists') { state.plNew = false; refreshPlaylists(); }
     if (p === 'new') renderNew();
     if (p === 'merge') renderMerge();
     if (p === 'settings') renderSettings($('settingsContent'));
@@ -213,25 +219,32 @@
   async function resumeLog(id) {
     const log = await api.getLog(id);
     if (!log) { toast('作業ログを読み込めませんでした'); refreshLogs(); return; }
+    const info = await findVideo(log);
+    if (info) openWork(log, info);
+  }
+
+  // 作業ログの動画を見つける。前回の場所 → 選んでもらう、の順に、指紋か長さで同じ動画かを確かめる。
+  // 見つからない・違う動画のときは知らせて null
+  async function findVideo(log) {
     let info = null;
     const last = log.video && log.video.lastPath;
     if (last && await api.videoExists(last)) {
       const i = await api.inspectVideo(last);
       if (i.ok && i.fingerprint === log.video.fingerprint) info = i;
       else if (i.ok && (await sameVideoByDuration(log, i)).same) {
-        if (!await api.confirmVideoSwap(i.fileName)) return;
+        if (!await api.confirmVideoSwap(i.fileName)) return null;
         info = i;
       }
     }
     if (!info) {
       const p = await api.chooseVideo(`動画を選んでください（前回：${(log.video && log.video.fileName) || '不明'}）`);
-      if (!p) return;
+      if (!p) return null;
       const i = await api.inspectVideo(p);
-      if (!i.ok) { toast(i.reason); return; }
+      if (!i.ok) { toast(i.reason); return null; }
       if (i.fingerprint !== log.video.fingerprint) {
         const check = await sameVideoByDuration(log, i);
-        if (!check.same) { toast(check.reason || 'この作業の動画と違います'); return; }
-        if (!await api.confirmVideoSwap(i.fileName)) return;
+        if (!check.same) { toast(check.reason || 'この作業の動画と違います'); return null; }
+        if (!await api.confirmVideoSwap(i.fileName)) return null;
       }
       info = i;
     }
@@ -242,7 +255,7 @@
       const r = await api.saveLog(log);
       if (!r || !r.ok) toast('作業ログを保存できませんでした');
     }
-    openWork(log, info);
+    return info;
   }
 
   // 長さを ffmpeg で調べて比べる。調べられなかったとき（時間切れ・起動できない・読み取れない）はその理由も返す
@@ -435,6 +448,80 @@
 
   function resetMerge() { state.merge = { files: [], title: '', quality: 'source', phase: 'edit', progress: 0, output: null }; }
 
+  // プレイリスト
+  function newPlaylist(name) {
+    const now = new Date().toISOString();
+    return { version: 1, id: uuid(), createdAt: now, updatedAt: now, name: String(name || '').trim() || '新しいプレイリスト', items: [] };
+  }
+
+  async function refreshPlaylists() {
+    state.pls = await api.listPlaylists();
+    renderPlaylists();
+  }
+
+  function renderPlaylists() {
+    const box = $('plList');
+    box.replaceChildren();
+    if (state.plNew) box.append(newPlaylistRow());
+    if (!state.pls.length && !state.plNew) {
+      box.append(h('div', { class: 'empty' },
+        h('p', {}, 'まだプレイリストがありません。'),
+        h('p', {}, '作業画面のタグ一覧でシーンにチェックを入れ、「プレイリストに追加」で入れます。')));
+      return;
+    }
+    for (const p of state.pls) box.append(playlistRow(p));
+  }
+
+  function newPlaylistRow() {
+    const name = h('input', { class: 'field', placeholder: '例：渡辺組 FB', 'aria-label': 'プレイリストの名前' });
+    const create = async () => {
+      const r = await api.savePlaylist(newPlaylist(name.value));
+      if (!r || !r.ok) toast('プレイリストを保存できませんでした');
+      state.plNew = false;
+      refreshPlaylists();
+    };
+    const cancel = () => { state.plNew = false; renderPlaylists(); };
+    const form = h('div', { class: 'pl-edit' }, name,
+      h('button', { class: 'btn', onClick: cancel }, 'キャンセル'),
+      h('button', { class: 'btn primary', onClick: create }, '作る'));
+    form.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) create(); if (e.key === 'Escape') cancel(); });
+    setTimeout(() => name.focus(), 0);
+    return h('div', { class: 'log-row' }, form);
+  }
+
+  function playlistRow(p) {
+    const row = h('div', { class: 'log-row' });
+    const main = h('button', { class: 'log-main', onClick: () => openPlaylist(p.id) },
+      h('span', { class: 'log-name' }, p.name || 'プレイリスト'),
+      h('span', { class: 'log-cell' }, p.broken ? '読み込めません' : `${p.itemCount}本`),
+      h('span', { class: 'log-cell' }, p.broken ? '' : C.formatTimeShort(p.totalSec)),
+      h('span', { class: 'log-cell date' }, fmtDate(p.updatedAt)));
+    const actions = h('div', { class: 'log-actions' },
+      p.broken ? null : h('button', { class: 'btn small', onClick: () => editPlaylistRow(row, p) }, '名前を変える'),
+      h('button', { class: 'btn small danger', onClick: async () => { if (await api.deletePlaylist(p.id, p.name)) refreshPlaylists(); } }, '削除'));
+    row.append(main, actions);
+    return row;
+  }
+
+  function editPlaylistRow(row, p) {
+    const name = h('input', { class: 'field', value: p.name || '', 'aria-label': 'プレイリストの名前' });
+    const save = async () => {
+      const pl = await api.getPlaylist(p.id);
+      if (!pl) { toast('プレイリストを読み込めませんでした'); refreshPlaylists(); return; }
+      pl.name = name.value.trim() || pl.name;
+      const r = await api.savePlaylist(pl);
+      if (!r || !r.ok) toast('プレイリストを保存できませんでした');
+      refreshPlaylists();
+    };
+    const form = h('div', { class: 'pl-edit' }, name,
+      h('button', { class: 'btn', onClick: () => renderPlaylists() }, 'キャンセル'),
+      h('button', { class: 'btn primary', onClick: save }, '保存'));
+    form.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) save(); if (e.key === 'Escape') renderPlaylists(); });
+    row.replaceChildren(form);
+    name.focus();
+    name.select();
+  }
+
   async function startMerge() {
     const m = state.merge;
     if (m.files.length < 2) return;
@@ -606,6 +693,7 @@
 
   // ---------- 作業画面 ----------
   function openWork(log, info) {
+    leavePlaylist();
     closePopover();
     state.game = log;
     state.video = info;
@@ -668,8 +756,8 @@
     if (!r || !r.ok) toast('作業ログを保存できませんでした');
   }
 
-  // 再生
-  const video = () => $('video');
+  // 再生（作業画面とプレイリスト画面で、見えている方の映像を使う）
+  const video = () => $(state.view === 'playlist' ? 'plVideo' : 'video');
   function now() { return round3(video().currentTime || 0); }
   function togglePlay() {
     const v = video();
@@ -682,13 +770,25 @@
     state.stopAt = null;
     v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + d));
   }
+  // 動画を入れ替えても速度が変わらないよう、初期の速度もそろえる
   function setSpeed(i) {
     state.speedIndex = Math.max(0, Math.min(C.SPEEDS.length - 1, i));
     const sp = C.SPEEDS[state.speedIndex];
-    video().playbackRate = sp;
-    const b = $('btnSpeed');
-    b.textContent = `${sp}倍`;
-    b.classList.toggle('changed', sp !== 1);
+    const v = video();
+    v.defaultPlaybackRate = sp;
+    v.playbackRate = sp;
+    for (const b of [$('btnSpeed'), $('plSpeed')]) {
+      b.textContent = `${sp}倍`;
+      b.classList.toggle('changed', sp !== 1);
+    }
+  }
+  function setPlayIcon(btn, playing) {
+    const use = btn.querySelector('use');
+    const want = playing ? '#i-pause' : '#i-play';
+    if (use.getAttribute('href') === want) return;
+    use.setAttribute('href', want);
+    btn.setAttribute('aria-label', playing ? '停止' : '再生');
+    btn.title = playing ? '停止' : '再生';
   }
   function updateBar() {
     const v = video();
@@ -698,14 +798,7 @@
     const pct = d ? Math.min(100, (t / d) * 100) : 0;
     $('seekFill').style.width = `${pct}%`;
     $('seekThumb').style.left = `${pct}%`;
-    const playing = !v.paused && !v.ended;
-    const use = $('btnPlay').querySelector('use');
-    const want = playing ? '#i-pause' : '#i-play';
-    if (use.getAttribute('href') !== want) {
-      use.setAttribute('href', want);
-      $('btnPlay').setAttribute('aria-label', playing ? '停止' : '再生');
-      $('btnPlay').title = playing ? '停止' : '再生';
-    }
+    setPlayIcon($('btnPlay'), !v.paused && !v.ended);
   }
   function tick() {
     if (state.view === 'work') {
@@ -715,6 +808,8 @@
         state.stopAt = null;
       }
       updateBar();
+    } else if (state.view === 'playlist') {
+      plTick();
     }
     requestAnimationFrame(tick);
   }
@@ -853,7 +948,10 @@
     if (filterSel.value !== state.filter) { state.filter = 'all'; filterSel.value = 'all'; }
   }
 
-  function rerenderRows() { if (state.view === 'work' && state.game) { renderListControls(); renderRows(); pushKeyData(); } }
+  function rerenderRows() {
+    if (state.view === 'work' && state.game) { renderListControls(); renderRows(); pushKeyData(); }
+    if (state.view === 'playlist' && state.pl) renderPlaylistView();
+  }
 
   function renderRows() {
     if (!state.game) return;
@@ -877,6 +975,7 @@
     ca.checked = visibleIds.length > 0 && checkedVisible === visibleIds.length;
     ca.indeterminate = checkedVisible > 0 && checkedVisible < visibleIds.length;
     const n = state.game.scenes.filter(s => state.checked.has(s.id)).length;
+    $('btnAddToPl').disabled = n === 0;
     const ex = $('btnExport');
     ex.disabled = n === 0;
     ex.textContent = n ? `ダウンロード（${n}）` : 'ダウンロード';
@@ -1061,20 +1160,352 @@
     const pop = $('popover');
     pop.replaceChildren(...C.SPEEDS.map((sp, i) => h('button', { class: 'pop-item', onClick: () => { setSpeed(i); closePopover(); } },
       h('span', { class: 'tick' }, i === state.speedIndex ? '✓' : ''), `${sp}倍`)));
-    showPopover($('btnSpeed'));
+    showPopover($(state.view === 'playlist' ? 'plSpeed' : 'btnSpeed'));
+  }
+
+  // ---------- プレイリストに追加（作業画面） ----------
+  async function openAddToPlaylist() {
+    if (state.view !== 'work' || !state.game) return;
+    const n = state.game.scenes.filter(s => state.checked.has(s.id)).length;
+    if (!n) return;
+    const pls = (await api.listPlaylists()).filter(p => !p.broken);
+    const pop = $('popover');
+    const anchor = $('btnAddToPl');
+    const askName = () => {
+      const name = h('input', { class: 'field', placeholder: '新しいプレイリストの名前', 'aria-label': '新しいプレイリストの名前' });
+      const go = () => { closePopover(); addCheckedToPlaylist({ name: name.value }); };
+      name.addEventListener('keydown', e => {
+        if (e.isComposing) return;
+        if (e.key === 'Enter') { e.preventDefault(); go(); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePopover(); }
+      });
+      pop.replaceChildren(h('div', { class: 'pop-form' }, name, h('button', { class: 'btn primary small', onClick: go }, '作って追加')));
+      showPopover(anchor);
+      name.focus();
+    };
+    pop.replaceChildren(
+      h('div', { class: 'pop-head' }, `${n}本を入れるプレイリスト`),
+      ...pls.map(p => h('button', { class: 'pop-item', onClick: () => { closePopover(); addCheckedToPlaylist({ id: p.id }); } },
+        h('span', { class: 'pop-name' }, p.name || 'プレイリスト'), h('span', { class: 'dim' }, `${p.itemCount}本`))),
+      pls.length ? h('div', { class: 'pop-sep' }) : null,
+      // 中身を入れ替えるので、外側のクリックとして閉じないよう止める
+      h('button', { class: 'pop-item', onClick: e => { e.stopPropagation(); askName(); } }, '＋ 新しいプレイリスト'));
+    showPopover(anchor);
+  }
+
+  // チェックした行を、試合の時刻順でプレイリストの最後に入れる。同じシーンは1回だけ
+  async function addCheckedToPlaylist(target) {
+    const g = state.game;
+    if (!g) return;
+    const scenes = g.scenes.filter(s => state.checked.has(s.id)).sort((a, b) => a.start - b.start || a.seq - b.seq);
+    if (!scenes.length) return;
+    await saveNow(); // 入れるシーンが作業ログに書かれているようにする
+    const pl = target.id ? await api.getPlaylist(target.id) : newPlaylist(target.name);
+    if (!pl) { toast('プレイリストを読み込めませんでした'); return; }
+    const have = new Set(pl.items.map(it => `${it.logId}/${it.sceneId}`));
+    let added = 0;
+    for (const s of scenes) {
+      if (have.has(`${g.id}/${s.id}`)) continue;
+      pl.items.push({ logId: g.id, sceneId: s.id });
+      have.add(`${g.id}/${s.id}`);
+      added++;
+    }
+    if (added) {
+      const r = await api.savePlaylist(pl);
+      if (!r || !r.ok) { toast('プレイリストを保存できませんでした'); return; }
+    }
+    const dup = scenes.length - added;
+    toast(`「${pl.name}」に${added}本を追加しました${dup ? `（${dup}本はすでに入っています）` : ''}`);
+  }
+
+  // ---------- プレイリスト画面 ----------
+  const plKey = it => `${it.logId}/${it.sceneId}`;
+
+  // 前回の場所に同じ動画（指紋が同じ）があれば使う。ここではたずねない（見つからなければ行をクリックして選ぶ）
+  async function quickVideo(log) {
+    const last = log.video && log.video.lastPath;
+    if (!last || !await api.videoExists(last)) return null;
+    const i = await api.inspectVideo(last);
+    return i.ok && i.fingerprint === log.video.fingerprint ? i : null;
+  }
+
+  async function openPlaylist(id) {
+    const playlist = await api.getPlaylist(id);
+    if (!playlist) { toast('プレイリストを読み込めませんでした'); refreshPlaylists(); return; }
+    const logs = new Map();
+    const videos = new Map();
+    for (const logId of new Set(playlist.items.map(it => it.logId))) {
+      const log = await api.getLog(logId).catch(() => null);
+      logs.set(logId, log);
+      videos.set(logId, log ? await quickVideo(log) : null);
+    }
+    closePopover();
+    state.pl = { playlist, logs, videos, current: null, selected: null, loading: false, url: null };
+    state.view = 'playlist';
+    $('launcher').hidden = true;
+    $('work').hidden = true;
+    $('plView').hidden = false;
+    document.title = `${playlist.name || 'プレイリスト'} - Moment`;
+    layoutList();
+    setSpeed(C.SPEEDS.indexOf(1));
+    renderPlaylistView();
+  }
+
+  // プレイリスト画面を閉じる（映像を止めて外す）
+  function leavePlaylist() {
+    if (!state.pl) return;
+    const v = $('plVideo');
+    v.pause();
+    v.removeAttribute('src');
+    v.load();
+    state.pl = null;
+    $('plView').hidden = true;
+  }
+
+  // 一覧の1行分。status：ok（再生できる）/ novideo（動画が見つからない）/ noscene（元のシーンがない）
+  function plEntries() {
+    const pl = state.pl;
+    return pl.playlist.items.map(it => {
+      const log = pl.logs.get(it.logId);
+      const scene = log && log.scenes.find(s => s.id === it.sceneId);
+      const info = pl.videos.get(it.logId);
+      return { key: plKey(it), it, log, scene, info, status: !scene ? 'noscene' : info ? 'ok' : 'novideo' };
+    });
+  }
+  function plEntry(key) { return key ? plEntries().find(e => e.key === key) : null; }
+
+  // key の次（dir=1）か前（dir=-1）の、再生できる行。key がなければ最初から
+  function plNeighbor(key, dir) {
+    const list = plEntries();
+    let i = key ? list.findIndex(e => e.key === key) : (dir > 0 ? -1 : list.length);
+    for (i += dir; i >= 0 && i < list.length; i += dir) if (list[i].status === 'ok') return list[i].key;
+    return null;
+  }
+
+  function renderPlaylistView() {
+    const pl = state.pl;
+    const list = plEntries();
+    const total = list.reduce((sum, e) => sum + (e.scene ? e.scene.end - e.scene.start : 0), 0);
+    $('plTitle').textContent = pl.playlist.name || 'プレイリスト';
+    $('plCount').textContent = `${list.length}本 · ${C.formatTimeShort(total)}`;
+    $('plExport').disabled = !list.some(e => e.status === 'ok');
+    const box = $('plRows');
+    const keepScroll = box.scrollTop;
+    box.replaceChildren();
+    list.forEach((e, i) => box.append(plRow(e, i)));
+    if (!list.length) box.append(h('div', { class: 'list-empty' }, 'まだシーンが入っていません。作業画面のタグ一覧でシーンにチェックを入れ、「プレイリストに追加」で入れます。'));
+    box.scrollTop = keepScroll;
+  }
+
+  function plRow(e, i) {
+    const pl = state.pl;
+    const playing = pl.current === e.key;
+    const row = h('div', {
+      class: `row pl-row${pl.selected === e.key ? ' selected' : ''}${playing ? ' playing' : ''}${e.status !== 'ok' ? ' missing' : ''}`,
+      role: 'listitem', draggable: 'true', dataset: { key: e.key }
+    });
+    const log = e.log;
+    const title = e.scene ? C.sceneTitle(e.scene, log, state.settings, log.shortcutNames) : '';
+    row.style.setProperty('--team', teamVar(e.scene ? C.sceneTeam(e.scene, state.settings, log.shortcutNames) : null));
+    const gameName = log ? (log.gameName || baseName(log.video.fileName)) : '';
+    row.append(
+      h('span', { class: 'team-bar' }),
+      h('span', { class: 'handle', title: 'ドラッグで並べ替え' }, icon('i-drag')),
+      h('span', { class: 'num' }, playing ? '▶' : String(i + 1)),
+      h('span', { class: 'cell game', title: gameName }, gameName),
+      h('span', { class: 'cell times' }, e.scene ? [C.formatTimeShort(e.scene.start), h('span', { class: 'arrow' }, '→'), C.formatTimeShort(e.scene.end)] : null),
+      h('span', { class: 'cell title' }, e.scene ? (title || 'タイトルなし') : '元のシーンがありません'),
+      h('span', { class: 'cell tags' }, e.status === 'novideo' ? h('span', { class: 'note' }, '動画が見つかりません')
+        : e.scene ? e.scene.tags.map(id => h('span', { class: 'chip' }, C.resolveShortcut(id, state.settings, log.shortcutNames).name)) : null),
+      h('button', { class: 'icon-btn pl-remove', title: 'プレイリストから外す', 'aria-label': 'プレイリストから外す', onClick: ev => { ev.stopPropagation(); plRemove(e.key); } }, icon('i-x')));
+    row.addEventListener('click', () => {
+      plSelect(e.key);
+      if (e.status === 'ok') plPlay(e.key);
+      else if (e.status === 'novideo') plLocate(e.it.logId, e.key);
+    });
+    row.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/x-moment-pl', e.key); ev.dataTransfer.effectAllowed = 'move'; });
+    row.addEventListener('dragover', ev => { if (ev.dataTransfer.types.includes('text/x-moment-pl')) { ev.preventDefault(); row.classList.add('drop-before'); } });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-before'));
+    row.addEventListener('drop', ev => {
+      const from = ev.dataTransfer.getData('text/x-moment-pl');
+      if (!from) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      plMove(from, e.key);
+    });
+    return row;
+  }
+
+  function plSelect(key) {
+    state.pl.selected = key;
+    for (const el of $('plRows').querySelectorAll('.pl-row')) el.classList.toggle('selected', el.dataset.key === key);
+  }
+
+  function plSave() {
+    api.savePlaylist(state.pl.playlist).then(r => { if (!r || !r.ok) toast('プレイリストを保存できませんでした'); });
+  }
+
+  // from の行を、before の行の前へ動かす
+  function plMove(from, before) {
+    const items = state.pl.playlist.items;
+    const i = items.findIndex(it => plKey(it) === from);
+    const j = items.findIndex(it => plKey(it) === before);
+    if (i < 0 || j < 0 || i === j) { renderPlaylistView(); return; }
+    const [it] = items.splice(i, 1);
+    items.splice(i < j ? j - 1 : j, 0, it);
+    plSave();
+    renderPlaylistView();
+  }
+
+  function plRemove(key) {
+    const pl = state.pl;
+    const i = pl.playlist.items.findIndex(it => plKey(it) === key);
+    if (i < 0) return;
+    pl.playlist.items.splice(i, 1);
+    if (pl.current === key) { $('plVideo').pause(); pl.current = null; }
+    if (pl.selected === key) pl.selected = null;
+    plSave();
+    renderPlaylistView();
+  }
+
+  // 見つからない動画を選んでもらう（「再開する」と同じ決まり）。見つかったら作業ログの動画の場所も新しくする
+  async function plLocate(logId, key) {
+    const log = state.pl.logs.get(logId);
+    if (!log) return;
+    const info = await findVideo(log);
+    if (!info || !state.pl || state.pl.logs.get(logId) !== log) return;
+    log.video.lastPath = info.path;
+    log.video.fileName = info.fileName;
+    const r = await api.saveLog(log);
+    if (!r || !r.ok) toast('作業ログを保存できませんでした');
+    state.pl.videos.set(logId, info);
+    renderPlaylistView();
+    plPlay(key);
+  }
+
+  // そのシーンを開始から再生する。動画が違えば入れ替え、読み込めたら（loadedmetadata）開始へ飛ぶ
+  function plPlay(key) {
+    const pl = state.pl;
+    const e = plEntry(key);
+    if (!e || e.status !== 'ok') return;
+    pl.current = key;
+    const v = $('plVideo');
+    if (pl.url !== e.info.url) {
+      pl.url = e.info.url;
+      pl.loading = true;
+      v.src = e.info.url;
+    } else {
+      pl.loading = false;
+      v.currentTime = e.scene.start;
+      v.play().catch(() => {});
+    }
+    renderPlaylistView();
+    const el = $('plRows').querySelector(`.pl-row[data-key="${CSS.escape(key)}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  // 次の再生できるシーンへ。なければ止まる
+  function plAdvance() {
+    const next = plNeighbor(state.pl.current, 1);
+    if (next) plPlay(next); else $('plVideo').pause();
+  }
+
+  function plTogglePlay() {
+    const pl = state.pl;
+    const v = $('plVideo');
+    if (!v.paused && !v.ended) { v.pause(); return; }
+    const e = plEntry(pl.current);
+    if (e && e.status === 'ok' && !pl.loading && v.currentTime >= e.scene.start - 0.5 && v.currentTime < e.scene.end - 0.05) { v.play().catch(() => {}); return; }
+    const sel = plEntry(pl.selected);
+    const from = sel && sel.status === 'ok' ? sel.key : plNeighbor(null, 1);
+    if (from) plPlay(from);
+  }
+
+  function plStep(dir) {
+    const pl = state.pl;
+    const to = plNeighbor(pl.current, dir);
+    if (to) plPlay(to);
+    else if (pl.current) plPlay(pl.current);
+  }
+
+  // シーンの開始から終了の間で動かす
+  function plSeekTo(t) {
+    const e = plEntry(state.pl.current);
+    if (!e || e.status !== 'ok' || state.pl.loading) return;
+    $('plVideo').currentTime = Math.max(e.scene.start, Math.min(e.scene.end, t));
+  }
+
+  function plTick() {
+    const pl = state.pl;
+    const v = $('plVideo');
+    const e = plEntry(pl.current);
+    if (e && e.status === 'ok' && !pl.loading && !v.paused && v.currentTime >= e.scene.end) plAdvance();
+    updatePlBar();
+  }
+
+  function updatePlBar() {
+    const pl = state.pl;
+    const v = $('plVideo');
+    const list = plEntries();
+    const i = list.findIndex(e => e.key === pl.current);
+    const e = i >= 0 && list[i].status === 'ok' ? list[i] : null;
+    const len = e ? e.scene.end - e.scene.start : 0;
+    const t = e && !pl.loading ? Math.max(0, Math.min(len, v.currentTime - e.scene.start)) : 0;
+    $('plClock').textContent = `${C.formatTime(t)} / ${C.formatTime(len)}`;
+    const pct = len ? (t / len) * 100 : 0;
+    $('plSeekFill').style.width = `${pct}%`;
+    $('plSeekThumb').style.left = `${pct}%`;
+    $('plPos').textContent = i >= 0 ? `${i + 1} / ${list.length}` : `– / ${list.length}`;
+    setPlayIcon($('plPlay'), !v.paused && !v.ended);
   }
 
   // ---------- ダウンロード ----------
   function openExportSheet() {
+    if (state.view === 'playlist') { openPlaylistExportSheet(); return; }
     if (state.view !== 'work' || !state.game) return;
     const g = state.game;
     const items = g.scenes.filter(s => state.checked.has(s.id))
       .map(s => ({ id: s.id, title: C.sceneTitle(s, g, state.settings, g.shortcutNames), start: s.start, end: s.end }));
     if (!items.length) { toast('ダウンロードするシーンにチェックを入れてください'); return; }
     const titles = [...new Set(items.map(i => i.title))];
-    const st = {
-      phase: 'confirm', items, mode: 'separate',
+    showExportSheet({
+      items,
+      folder: g.gameName || 'Moment',
       mergedTitle: titles.length === 1 && titles[0] ? titles[0] : `${g.gameName} まとめ`,
+      notes: [],
+      // 別々のときのファイル名（試合の時刻順）
+      fileNames: () => { const m = C.planFileNames(items); return [...items].sort((a, b) => a.start - b.start).map(i => m.get(i.id)); },
+      start: st => api.startExport({
+        input: state.video.path, dest: st.dest, gameName: g.gameName, quality: st.quality, mode: st.mode, mergedTitle: st.mergedTitle, items: st.items
+      })
+    });
+  }
+
+  // プレイリストのダウンロード：再生できるシーン全部を、プレイリストの順に
+  function openPlaylistExportSheet() {
+    if (!state.pl) return;
+    const pl = state.pl.playlist;
+    const list = plEntries();
+    const ok = list.filter(e => e.status === 'ok');
+    if (!ok.length) return;
+    const items = ok.map(e => ({ id: e.key, input: e.info.path, title: C.sceneTitle(e.scene, e.log, state.settings, e.log.shortcutNames), start: e.scene.start, end: e.scene.end }));
+    const novideo = list.filter(e => e.status === 'novideo').length;
+    const noscene = list.filter(e => e.status === 'noscene').length;
+    const name = pl.name || 'プレイリスト';
+    showExportSheet({
+      items,
+      folder: name,
+      mergedTitle: name,
+      notes: [novideo ? `動画が見つからない${novideo}本は入りません。` : null, noscene ? `元のシーンがない${noscene}本は入りません。` : null].filter(Boolean),
+      fileNames: () => { const m = C.playlistFileNames(items); return items.map(i => m.get(i.id)); },
+      start: st => api.startPlaylistExport({ dest: st.dest, name, quality: st.quality, mode: st.mode, mergedTitle: st.mergedTitle, items: st.items })
+    });
+  }
+
+  // 確認画面を出す。src：{items, folder, mergedTitle, notes, fileNames(), start(st)}
+  function showExportSheet(src) {
+    const st = {
+      ...src, phase: 'confirm', mode: 'separate',
       dest: state.settings.exportDir, quality: state.settings.exportQuality,
       progress: 0, done: 0, current: '', result: null
     };
@@ -1085,16 +1516,13 @@
 
   function renderExportSheet() {
     const st = state.sheet.st;
-    const g = state.game;
     const body = $('sheetBody');
     body.className = 'sheet';
     body.replaceChildren();
     const n = st.items.length;
     if (st.phase === 'confirm') {
-      const names = st.mode === 'merged'
-        ? [`${C.sanitizeFileName(st.mergedTitle || 'まとめ')}.mp4`]
-        : (() => { const m = C.planFileNames(st.items); return [...st.items].sort((a, b) => a.start - b.start).map(i => m.get(i.id)); })();
-      const folder = C.sanitizeFileName(g.gameName || 'Moment');
+      const names = st.mode === 'merged' ? [`${C.sanitizeFileName(st.mergedTitle || 'まとめ')}.mp4`] : st.fileNames();
+      const folder = C.sanitizeFileName(st.folder);
       const shown = names.slice(0, 4);
       const destText = h('span', { class: 'path', title: st.dest || '' }, st.dest ? shortPath(st.dest) : '未選択');
       const mergedTitle = h('input', { class: 'field', value: st.mergedTitle, style: 'width:100%;margin-top:10px', 'aria-label': '結合したファイルのタイトル', onInput: e => { st.mergedTitle = e.target.value; preview.replaceChildren(...previewLines()); } });
@@ -1106,7 +1534,7 @@
       const mode = (val, label) => h('label', {}, h('input', { type: 'radio', name: 'xm', checked: st.mode === val, onChange: () => { st.mode = val; renderExportSheet(); } }), label);
       body.append(
         h('h2', {}, 'ダウンロード'),
-        h('p', { class: 'sub' }, `${n}本のシーンを動画ファイルにします。開始から終了まで、ずれなく切り出します。`),
+        h('p', { class: 'sub' }, `${n}本のシーンを動画ファイルにします。開始から終了まで、ずれなく切り出します。`, ...st.notes.map(t => [h('br'), t])),
         h('div', { class: 'section' }, h('div', { class: 'section-title' }, '書き方'),
           h('div', { class: 'radio-row' }, mode('separate', 'シーンごとに別々のファイル'), mode('merged', '1本に結合')),
           st.mode === 'merged' ? mergedTitle : null),
@@ -1182,15 +1610,7 @@
     });
     const v = video();
     if (!v.paused) v.pause();
-    const result = await api.startExport({
-      input: state.video.path,
-      dest: st.dest,
-      gameName: state.game.gameName,
-      quality: st.quality,
-      mode: st.mode,
-      mergedTitle: st.mergedTitle,
-      items: st.items
-    });
+    const result = await st.start(st);
     off();
     st.result = result;
     st.phase = 'done';
@@ -1231,7 +1651,7 @@
       if (e.key === 'Escape') { e.preventDefault(); closeSheet(); }
       return;
     }
-    if (state.view !== 'work') return;
+    if (state.view !== 'work' && state.view !== 'playlist') return;
 
     const ae = document.activeElement;
     if (ae && ae !== document.body && (ae.tagName === 'BUTTON' || (ae.tagName === 'INPUT' && !isTyping(ae)))) ae.blur();
@@ -1242,6 +1662,7 @@
 
     if (is('toggleKeys') && !b.toggleKeys.meta) { e.preventDefault(); api.toggleKeys(); return; }
     if (combo.meta) return; // ⌘ の付くものはメニューに任せる
+    if (state.view === 'playlist') { plKeyDown(e, combo, is); return; }
     if ((e.code === 'Delete' || e.code === 'Backspace') && !combo.shift && !combo.alt) {
       if (state.selectedId) { e.preventDefault(); deleteSelected(); }
       return;
@@ -1261,6 +1682,21 @@
     if (sc) { e.preventDefault(); if (!e.repeat) applyShortcut(sc); }
   }
 
+  // プレイリスト画面のキー。再生は作業画面と同じキーで、記録とショートカットは働かない
+  function plKeyDown(e, combo, is) {
+    const pl = state.pl;
+    if ((e.code === 'Delete' || e.code === 'Backspace') && !combo.shift && !combo.alt) {
+      if (pl.selected) { e.preventDefault(); plRemove(pl.selected); }
+      return;
+    }
+    if (e.code === 'Escape') { if (pl.selected) plSelect(null); return; }
+    if (is('playPause')) { e.preventDefault(); if (!e.repeat) plTogglePlay(); return; }
+    if (is('back')) { e.preventDefault(); plSeekTo($('plVideo').currentTime - C.SEEK_STEP); return; }
+    if (is('forward')) { e.preventDefault(); plSeekTo($('plVideo').currentTime + C.SEEK_STEP); return; }
+    if (is('slower')) { e.preventDefault(); if (!e.repeat) setSpeed(state.speedIndex - 1); return; }
+    if (is('faster')) { e.preventDefault(); if (!e.repeat) setSpeed(state.speedIndex + 1); }
+  }
+
   // ---------- つなぎこみ ----------
   function bind() {
     window.addEventListener('keydown', onKeyDown, true);
@@ -1272,6 +1708,7 @@
       });
     }
     $('importLog').addEventListener('click', importLog);
+    $('newPlaylist').addEventListener('click', () => { state.plNew = true; renderPlaylists(); });
 
     const v = $('video');
     v.addEventListener('loadedmetadata', () => {
@@ -1309,19 +1746,18 @@
     seek.addEventListener('pointerdown', e => { seek.setPointerCapture(e.pointerId); seekTo(e.clientX); });
     seek.addEventListener('pointermove', e => { if (seek.hasPointerCapture(e.pointerId)) seekTo(e.clientX); });
 
-    const split = $('splitter');
-    split.addEventListener('pointerdown', e => {
+    const bindSplitter = (split, w) => split.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
       e.preventDefault();
       split.setPointerCapture(e.pointerId);
       document.body.classList.add('resizing');
+      const bar = w.querySelector('.bar');
       // つかんだ位置と境目のずれ。これを保ったまま動かすので、つかんだ瞬間に跳ねない
-      const grab = $('bar').getBoundingClientRect().top - e.clientY;
+      const grab = bar.getBoundingClientRect().top - e.clientY;
       let done = false;
       const move = ev => {
-        const w = $('work');
         const wr = w.getBoundingClientRect();
-        const barH = $('bar').offsetHeight;
+        const barH = bar.offsetHeight;
         const avail = wr.height - barH;
         const want = wr.bottom - (ev.clientY + grab) - barH;
         const listH = listHeightFor(avail, want / avail);
@@ -1343,6 +1779,8 @@
       split.addEventListener('pointercancel', end);
       split.addEventListener('lostpointercapture', end);
     });
+    bindSplitter($('splitter'), $('work'));
+    bindSplitter($('plSplitter'), $('plView'));
     window.addEventListener('resize', layoutList);
 
     $('sortSel').addEventListener('change', e => { state.sort = e.target.value; e.target.blur(); renderRows(); });
@@ -1356,7 +1794,52 @@
       renderRows();
     });
     $('btnExport').addEventListener('click', openExportSheet);
+    $('btnAddToPl').addEventListener('click', e => { e.stopPropagation(); if (!$('popover').hidden) closePopover(); else openAddToPlaylist(); });
     $('rows').addEventListener('click', e => { if (e.target === $('rows')) select(null); });
+
+    // プレイリスト画面
+    const plv = $('plVideo');
+    plv.addEventListener('loadedmetadata', () => {
+      const pl = state.pl;
+      if (!pl || !pl.loading) return;
+      pl.loading = false;
+      const e = plEntry(pl.current);
+      if (!e || e.status !== 'ok') return;
+      plv.currentTime = e.scene.start;
+      plv.play().catch(() => {});
+    });
+    plv.addEventListener('ended', () => { if (state.pl && !state.pl.loading && state.pl.current) plAdvance(); });
+    // 開けない動画は「動画が見つかりません」と同じ扱いにして飛ばす（行をクリックすると選び直せる）
+    plv.addEventListener('error', () => {
+      const pl = state.pl;
+      if (state.view !== 'playlist' || !pl || !plv.getAttribute('src')) return;
+      toast('この形式の動画は開けません');
+      const e = plEntry(pl.current);
+      pl.loading = false;
+      pl.url = null;
+      if (!e) return;
+      pl.videos.set(e.it.logId, null);
+      const next = plNeighbor(e.key, 1);
+      pl.current = null;
+      renderPlaylistView();
+      if (next) plPlay(next);
+    });
+    $('plBack').addEventListener('click', () => showLauncher('playlists'));
+    $('plPlay').addEventListener('click', plTogglePlay);
+    $('plPrev').addEventListener('click', () => plStep(-1));
+    $('plNext').addEventListener('click', () => plStep(1));
+    $('plSpeed').addEventListener('click', e => { e.stopPropagation(); if (!$('popover').hidden) closePopover(); else openSpeedPopover(); });
+    $('plExport').addEventListener('click', openPlaylistExportSheet);
+    $('plRows').addEventListener('click', e => { if (e.target === $('plRows')) plSelect(null); });
+    const plSeek = $('plSeek');
+    const plSeekAt = x => {
+      const e = plEntry(state.pl && state.pl.current);
+      if (!e || e.status !== 'ok') return;
+      const r = plSeek.getBoundingClientRect();
+      plSeekTo(e.scene.start + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (e.scene.end - e.scene.start));
+    };
+    plSeek.addEventListener('pointerdown', e => { plSeek.setPointerCapture(e.pointerId); plSeekAt(e.clientX); });
+    plSeek.addEventListener('pointermove', e => { if (plSeek.hasPointerCapture(e.pointerId)) plSeekAt(e.clientX); });
 
     document.addEventListener('click', e => { if (!$('popover').hidden && !e.target.closest('#popover')) closePopover(); });
     $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
@@ -1373,10 +1856,10 @@
     });
 
     // メニュー
-    api.on('menu:new', async () => { if (state.view === 'work') await closeWork('new'); state.newFlow = null; selectPane('new'); pickNewVideo(); });
-    api.on('menu:merge', async () => { if (state.view === 'work') await closeWork('merge'); else selectPane('merge'); });
+    api.on('menu:new', async () => { if (state.view !== 'launcher') await closeWork('new'); state.newFlow = null; selectPane('new'); pickNewVideo(); });
+    api.on('menu:merge', async () => { if (state.view !== 'launcher') await closeWork('merge'); else selectPane('merge'); });
     api.on('menu:log', () => closeWork('logs'));
-    api.on('menu:settings', () => { if (state.view === 'work') openSettingsSheet(); else selectPane('settings'); });
+    api.on('menu:settings', () => { if (state.view !== 'launcher') openSettingsSheet(); else selectPane('settings'); });
     api.on('menu:export', () => openExportSheet());
     api.on('menu:import', importLog);
     api.on('menu:undo', () => { if (isTyping(document.activeElement)) document.execCommand('undo'); else if (!state.sheet) undo(); });

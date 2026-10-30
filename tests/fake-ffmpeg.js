@@ -6,6 +6,8 @@
 //   FAKE_FF_FAIL_AT   n 回目の書き出しを失敗させる（例：2 / 1,3）
 //   FAKE_FF_HANG_AT   n 回目の書き出しで止まる
 //   FAKE_FF_TOUCH     FAKE_FF_TOUCH_AT 回目の書き出しの途中で、ほかのアプリのふりをしてこのファイルを作る
+//   FAKE_FF_ARGS      書き出しのたびに、受け取った引数を1行ずつ（JSON）書き足すファイル
+//   FAKE_FF_NOAUDIO   調べるとき、音声のない動画として答えるファイル名（例：b.mp4,c.mp4）
 'use strict';
 const fs = require('fs');
 
@@ -14,6 +16,11 @@ const env = process.env;
 
 function hang() { setInterval(() => {}, 1000); }
 function listed(name) { return (env[name] || '').split(',').filter(Boolean).map(Number); }
+
+function noAudio() {
+  const input = args[args.indexOf('-i') + 1] || '';
+  return (env.FAKE_FF_NOAUDIO || '').split(',').filter(Boolean).includes(input.split(/[\\/]/).pop());
+}
 
 function count() {
   const f = env.FAKE_FF_STATE;
@@ -34,7 +41,7 @@ function probe() {
   process.stderr.write("Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'input':\n"
     + `  Duration: ${env.FAKE_FF_DURATION || '00:01:40.50'}, start: 0.000000, bitrate: 1000 kb/s\n`
     + '  Stream #0:0(und): Video: h264 (High) (avc1 / 0x31637661), yuv420p, 1920x1080, 5000 kb/s, 29.97 fps, 29.97 tbr\n'
-    + '  Stream #0:1(und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s\n');
+    + (noAudio() ? '' : '  Stream #0:1(und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s\n'));
   if (mode === 'flood') {
     const junk = `${'x'.repeat(64 * 1024)}\n`;
     const pump = () => {
@@ -49,6 +56,7 @@ function probe() {
 
 function encode() {
   const n = count();
+  if (env.FAKE_FF_ARGS) fs.appendFileSync(env.FAKE_FF_ARGS, `${JSON.stringify(args)}\n`);
   const out = args[args.length - 1];
   if (args.includes('-n') && fs.existsSync(out)) {
     process.stderr.write(`File '${out}' already exists. Exiting.\n`);

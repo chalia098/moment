@@ -89,6 +89,19 @@ test('ファイル名：使えない文字を置き換え、同じタイトル�
   assert.strictEqual(C.planFileNames(many).get('s0'), 'FB 001.mp4');
 });
 
+test('ファイル名（プレイリスト）：プレイリストの順に番号を前に付ける。100本以上なら3桁', () => {
+  const names = C.playlistFileNames([
+    { id: 'b', title: '渡辺組 FB' },
+    { id: 'a', title: '順天堂 setOF 6:5' },
+    { id: 'c', title: '' },
+    { id: 'd', title: '渡辺組 FB' }
+  ]);
+  assert.deepStrictEqual([...names.values()], ['01 渡辺組 FB.mp4', '02 順天堂 setOF 6-5.mp4', '03 タイトルなし.mp4', '04 渡辺組 FB.mp4']);
+  const many = C.playlistFileNames(Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, title: 'FB' })));
+  assert.strictEqual(many.get('s0'), '001 FB.mp4');
+  assert.strictEqual(many.get('s99'), '100 FB.mp4');
+});
+
 test('ファイル名：大文字・小文字や Unicode の正規化だけが違うタイトルは、続きの番号にして同じ名前を作らない', () => {
   const nfd = 'が'.normalize('NFD');
   const names = C.planFileNames([
