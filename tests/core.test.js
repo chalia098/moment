@@ -15,6 +15,14 @@ test('時刻の表示', () => {
   assert.strictEqual(C.formatTime(NaN), '00:00:000');
 });
 
+test('タグ一覧の時刻の表示はミリ秒を出さない', () => {
+  assert.strictEqual(C.formatTimeShort(0), '00:00');
+  assert.strictEqual(C.formatTimeShort(5.999), '00:05');
+  assert.strictEqual(C.formatTimeShort(754.9), '12:34');
+  assert.strictEqual(C.formatTimeShort(3735.48), '1:02:15');
+  assert.strictEqual(C.formatTimeShort(NaN), '00:00');
+});
+
 test('時刻の読み取り', () => {
   assert.strictEqual(C.parseTime('52:39'), 3159);
   assert.strictEqual(C.parseTime('52:39:120'), 3159.12);

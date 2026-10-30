@@ -326,7 +326,7 @@ body.resizing, body.resizing * { cursor: row-resize !important; }
 .row {
   --team: var(--team-none);
   display: grid;
-  grid-template-columns: 4px 34px 220px minmax(170px, 1.4fr) minmax(110px, 1fr) minmax(120px, 1.2fr);
+  grid-template-columns: 4px 34px 168px minmax(170px, 1.4fr) minmax(110px, 1fr) minmax(120px, 1.2fr);
   align-items: center;
   height: 36px;
   border-bottom: 1px solid var(--line-soft);
@@ -348,7 +348,7 @@ body.resizing, body.resizing * { cursor: row-resize !important; }
 .row.mouse-tags .tags { cursor: pointer; }
 .chip { font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
 .row .edit { width: 100%; height: 26px; border-radius: 5px; border: 1px solid var(--focus); background: var(--surface); padding: 0 6px; user-select: text; font-weight: 400; color: var(--text); }
-.row .times .edit { width: 96px; }
+.row .times .edit { width: 72px; }
 .row.pending { background: color-mix(in srgb, var(--rec) 7%, var(--surface)); }
 .row.pending .recording { color: var(--rec); font-weight: 600; }
 .row.flash { animation: flash 1.4s ease-out; }

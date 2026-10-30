@@ -10,15 +10,26 @@
   const SEEK_STEP = 3;
 
   // ---------- 時刻 ----------
-  // 秒 → "05:03:120" / "1:02:15:000"（ミリ秒は切り捨て。小数の誤差で1ミリ秒減らないよう少し足す）
+  // 秒 → "05:03:120" / "1:02:15:000"（再生バーなど）
   function formatTime(sec) {
+    return clockText(sec, true);
+  }
+
+  // 秒 → "05:03" / "1:02:15"（タグ一覧）
+  function formatTimeShort(sec) {
+    return clockText(sec, false);
+  }
+
+  // ミリ秒は切り捨て。小数の誤差で1ミリ秒減らないよう少し足す
+  function clockText(sec, withMs) {
     if (!Number.isFinite(sec) || sec < 0) sec = 0;
     const total = Math.floor(sec * 1000 + 1e-6);
     const t = Math.floor(total / 1000);
     const h = Math.floor(t / 3600);
     const m = Math.floor((t % 3600) / 60);
     const s = t % 60;
-    const tail = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(total % 1000).padStart(3, '0')}`;
+    let tail = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (withMs) tail += `:${String(total % 1000).padStart(3, '0')}`;
     if (h > 0) return `${h}:${tail}`;
     return tail;
   }
@@ -261,7 +272,7 @@
 
   return {
     SPEEDS, SEEK_STEP, SORTS, BASE_ACTIONS,
-    formatTime, parseTime, teamName, resolveShortcut, autoTitle, sceneTitle, sceneTeam,
+    formatTime, formatTimeShort, parseTime, teamName, resolveShortcut, autoTitle, sceneTitle, sceneTeam,
     sanitizeFileName, fileNameKey, planFileNames, codeLabel, keyLabel, comboFromEvent, sameCombo, keyProblem,
     defaultSettings, sortScenes, filterScenes, sameDuration, MODIFIER_CODES
   };

@@ -897,7 +897,7 @@
     const row = h('div', { class: 'row pending', role: 'listitem' },
       h('span', { class: 'team-bar' }),
       h('span'),
-      h('span', { class: 'cell times' }, C.formatTime(p.start), h('span', { class: 'arrow' }, '→'), h('span', { class: 'recording' }, '記録中')),
+      h('span', { class: 'cell times' }, C.formatTimeShort(p.start), h('span', { class: 'arrow' }, '→'), h('span', { class: 'recording' }, '記録中')),
       h('span', { class: 'cell title' }, title || ''),
       h('span', { class: 'cell tags' }, chips(p.tags)),
       h('span', { class: 'cell memo' }));
@@ -923,7 +923,7 @@
     row.append(
       h('span', { class: 'team-bar' }),
       h('label', { class: 'check', onClick: e => e.stopPropagation() }, check),
-      h('span', { class: 'cell times' }, field(r, 'start', C.formatTime(r.start)), h('span', { class: 'arrow' }, '→'), field(r, 'end', C.formatTime(r.end))),
+      h('span', { class: 'cell times' }, field(r, 'start', C.formatTimeShort(r.start)), h('span', { class: 'arrow' }, '→'), field(r, 'end', C.formatTimeShort(r.end))),
       h('span', { class: 'cell title' }, field(r, 'title', r.title || 'タイトルなし', !r.title)),
       tags,
       h('span', { class: 'cell memo' }, field(r, 'memo', r.memo || 'メモ', !r.memo)));
@@ -958,7 +958,7 @@
     if (!s) return;
     if (state.selectedId !== id) select(id);
     const r = rowData(s);
-    const value = fieldName === 'start' ? C.formatTime(s.start) : fieldName === 'end' ? C.formatTime(s.end) : fieldName === 'title' ? (r.title || '') : (s.memo || '');
+    const value = fieldName === 'start' ? C.formatTimeShort(s.start) : fieldName === 'end' ? C.formatTimeShort(s.end) : fieldName === 'title' ? (r.title || '') : (s.memo || '');
     const input = h('input', { class: 'edit', value, 'aria-label': { start: '開始', end: '終了', title: 'タイトル', memo: 'メモ' }[fieldName] });
     let done = false;
     const finish = commit => {
@@ -985,9 +985,9 @@
     if (!s) { renderRows(); return; }
     if (fieldName === 'start' || fieldName === 'end') {
       const old = fieldName === 'start' ? s.start : s.end;
-      if (String(raw).trim() === C.formatTime(old)) { renderRows(); return; }
+      if (String(raw).trim() === C.formatTimeShort(old)) { renderRows(); return; }
       const sec = C.parseTime(raw);
-      if (sec == null) { toast('時刻は 52:39:120 のように入れてください'); renderRows(); return; }
+      if (sec == null) { toast('時刻は 52:39 のように入れてください'); renderRows(); return; }
       const ns = fieldName === 'start' ? sec : s.start;
       const ne = fieldName === 'end' ? sec : s.end;
       const dur = video().duration;
