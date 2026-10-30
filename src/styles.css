@@ -357,7 +357,7 @@ body.resizing, body.resizing * { cursor: row-resize !important; }
 .list-empty { color: var(--text-2); padding: 22px 16px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
 /* プレイリスト画面の一覧 */
-.row.pl-row { grid-template-columns: 4px 26px 34px minmax(110px, 1fr) 168px minmax(150px, 1.4fr) minmax(100px, 1fr) 40px; cursor: default; }
+.row.pl-row { grid-template-columns: 4px 26px 34px minmax(100px, 1fr) 168px minmax(140px, 1.3fr) minmax(90px, 0.9fr) minmax(120px, 1.2fr) 40px; cursor: default; }
 .pl-row .handle { color: var(--text-3); display: flex; align-items: center; justify-content: center; cursor: grab; }
 .pl-row .num { color: var(--text-3); text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
 .pl-row.playing .num { color: var(--text); font-weight: 600; }

@@ -1284,6 +1284,7 @@
 
   function renderPlaylistView() {
     const pl = state.pl;
+    if (pl.editing) pl.editing.finish(true); // 書いている途中のメモは確定してから描き直す
     const list = plEntries();
     const total = list.reduce((sum, e) => sum + (e.scene ? e.scene.end - e.scene.start : 0), 0);
     $('plTitle').textContent = pl.playlist.name || 'プレイリスト';
@@ -1317,12 +1318,17 @@
       h('span', { class: 'cell title' }, e.scene ? (title || 'タイトルなし') : '元のシーンがありません'),
       h('span', { class: 'cell tags' }, e.status === 'novideo' ? h('span', { class: 'note' }, '動画が見つかりません')
         : e.scene ? e.scene.tags.map(id => h('span', { class: 'chip' }, C.resolveShortcut(id, state.settings, log.shortcutNames).name)) : null),
+      h('span', { class: 'cell memo' }, e.scene ? field(e, 'memo', e.scene.memo || 'メモ', !e.scene.memo) : null),
       h('button', { class: 'icon-btn pl-remove', title: 'プレイリストから外す', 'aria-label': 'プレイリストから外す', onClick: ev => { ev.stopPropagation(); plRemove(e.key); } }, icon('i-x')));
-    row.addEventListener('click', () => {
+    row.addEventListener('click', ev => {
+      if (ev.target.closest('input.edit')) return;
+      // 選んでいる行のメモの欄をもう一度クリックすると書き換える（再生はし直さない）
+      if (ev.target.closest('.f') && pl.selected === e.key) { startPlMemoEdit(e.key); return; }
       plSelect(e.key);
       if (e.status === 'ok') plPlay(e.key);
       else if (e.status === 'novideo') plLocate(e.it.logId, e.key);
     });
+    row.addEventListener('dblclick', ev => { if (ev.target.closest('.f')) startPlMemoEdit(e.key); });
     row.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/x-moment-pl', e.key); ev.dataTransfer.effectAllowed = 'move'; });
     row.addEventListener('dragover', ev => { if (ev.dataTransfer.types.includes('text/x-moment-pl')) { ev.preventDefault(); row.classList.add('drop-before'); } });
     row.addEventListener('dragleave', () => row.classList.remove('drop-before'));
@@ -1339,6 +1345,59 @@
   function plSelect(key) {
     state.pl.selected = key;
     for (const el of $('plRows').querySelectorAll('.pl-row')) el.classList.toggle('selected', el.dataset.key === key);
+  }
+
+  // 再生しているシーンの印だけを付け替える（一覧を描き直さないので、書いている途中のメモは消えない）
+  function markPlaying() {
+    const pl = state.pl;
+    $('plRows').querySelectorAll('.pl-row').forEach((el, i) => {
+      const on = el.dataset.key === pl.current;
+      el.classList.toggle('playing', on);
+      el.querySelector('.num').textContent = on ? '▶' : String(i + 1);
+    });
+  }
+
+  // メモは作業ログのシーンのメモそのもの。書き換えたら、その試合の作業ログを保存する
+  function startPlMemoEdit(key) {
+    const pl = state.pl;
+    const e = plEntry(key);
+    const span = $('plRows').querySelector(`.pl-row[data-key="${CSS.escape(key)}"] .f[data-field="memo"]`);
+    if (!e || !e.scene || !span || pl.editing) return;
+    if (pl.selected !== key) plSelect(key);
+    const input = h('input', { class: 'edit', value: e.scene.memo || '', 'aria-label': 'メモ' });
+    let done = false;
+    const finish = commit => {
+      if (done) return;
+      done = true;
+      pl.editing = null;
+      if (!commit || input.value === (e.scene.memo || '')) return;
+      e.scene.memo = input.value;
+      api.saveLog(e.log).then(r => { if (!r || !r.ok) toast('作業ログを保存できませんでした'); });
+    };
+    pl.editing = { finish };
+    input.addEventListener('keydown', ev => {
+      if (ev.isComposing) return;
+      if (ev.key === 'Enter') { ev.preventDefault(); finish(true); renderPlaylistView(); }
+      else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); finish(false); renderPlaylistView(); }
+    });
+    input.addEventListener('blur', () => { if (!done) { finish(true); renderPlaylistView(); } });
+    input.addEventListener('click', ev => ev.stopPropagation());
+    input.addEventListener('dblclick', ev => ev.stopPropagation());
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  // 映像を外して黒にする（再生しているシーンを外したとき・プレイリストが空になったとき）
+  function plClearVideo() {
+    const pl = state.pl;
+    const v = $('plVideo');
+    v.pause();
+    v.removeAttribute('src');
+    v.load();
+    pl.url = null;
+    pl.current = null;
+    pl.loading = false;
   }
 
   function plSave() {
@@ -1362,7 +1421,7 @@
     const i = pl.playlist.items.findIndex(it => plKey(it) === key);
     if (i < 0) return;
     pl.playlist.items.splice(i, 1);
-    if (pl.current === key) { $('plVideo').pause(); pl.current = null; }
+    if (pl.current === key || !pl.playlist.items.length) plClearVideo();
     if (pl.selected === key) pl.selected = null;
     plSave();
     renderPlaylistView();
@@ -1399,7 +1458,7 @@
       v.currentTime = e.scene.start;
       v.play().catch(() => {});
     }
-    renderPlaylistView();
+    markPlaying();
     const el = $('plRows').querySelector(`.pl-row[data-key="${CSS.escape(key)}"]`);
     if (el) el.scrollIntoView({ block: 'nearest' });
   }
