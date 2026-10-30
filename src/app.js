@@ -987,7 +987,7 @@
       const old = fieldName === 'start' ? s.start : s.end;
       if (String(raw).trim() === C.formatTime(old)) { renderRows(); return; }
       const sec = C.parseTime(raw);
-      if (sec == null) { toast('時刻は 52:39 のように入れてください'); renderRows(); return; }
+      if (sec == null) { toast('時刻は 52:39:120 のように入れてください'); renderRows(); return; }
       const ns = fieldName === 'start' ? sec : s.start;
       const ne = fieldName === 'end' ? sec : s.end;
       const dur = video().duration;

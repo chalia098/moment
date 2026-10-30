@@ -10,24 +10,28 @@
   const SEEK_STEP = 3;
 
   // ---------- 時刻 ----------
+  // 秒 → "05:03:120" / "1:02:15:000"（ミリ秒は切り捨て。小数の誤差で1ミリ秒減らないよう少し足す）
   function formatTime(sec) {
     if (!Number.isFinite(sec) || sec < 0) sec = 0;
-    const t = Math.floor(sec);
+    const total = Math.floor(sec * 1000 + 1e-6);
+    const t = Math.floor(total / 1000);
     const h = Math.floor(t / 3600);
     const m = Math.floor((t % 3600) / 60);
     const s = t % 60;
-    const ss = String(s).padStart(2, '0');
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${ss}`;
-    return `${m}:${ss}`;
+    const tail = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(total % 1000).padStart(3, '0')}`;
+    if (h > 0) return `${h}:${tail}`;
+    return tail;
   }
 
-  // "52:39" / "1:02:15" / "75" → 秒。読めなければ null
+  // "52:39:120" / "1:02:15:000" / "52:39" / "1:02:15" / "75" → 秒。最後が3桁ならミリ秒。読めなければ null
   function parseTime(text) {
     const str = String(text || '').trim().replace(/[：]/g, ':').replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
-    if (!/^\d+(:\d{1,2}){0,2}$/.test(str)) return null;
-    const parts = str.split(':').map(Number);
+    const match = /^(\d+(?::\d{1,2}){0,2})(?::(\d{3}))?$/.exec(str);
+    if (!match) return null;
+    const parts = match[1].split(':').map(Number);
     if (parts.length > 1 && parts.slice(1).some(p => p >= 60)) return null;
-    return parts.reduce((acc, p) => acc * 60 + p, 0);
+    const sec = parts.reduce((acc, p) => acc * 60 + p, 0);
+    return match[2] ? sec + Number(match[2]) / 1000 : sec;
   }
 
   // ---------- チームとタイトル ----------

@@ -4,18 +4,36 @@ const assert = require('node:assert');
 const C = require('../src/lib/core.js');
 
 test('時刻の表示', () => {
-  assert.strictEqual(C.formatTime(5), '0:05');
-  assert.strictEqual(C.formatTime(65), '1:05');
-  assert.strictEqual(C.formatTime(754.9), '12:34');
-  assert.strictEqual(C.formatTime(3735), '1:02:15');
+  assert.strictEqual(C.formatTime(0), '00:00:000');
+  assert.strictEqual(C.formatTime(5), '00:05:000');
+  assert.strictEqual(C.formatTime(65), '01:05:000');
+  assert.strictEqual(C.formatTime(754.9), '12:34:900');
+  assert.strictEqual(C.formatTime(1.005), '00:01:005');
+  assert.strictEqual(C.formatTime(59.9996), '00:59:999');
+  assert.strictEqual(C.formatTime(3735), '1:02:15:000');
+  assert.strictEqual(C.formatTime(3735.48), '1:02:15:480');
+  assert.strictEqual(C.formatTime(NaN), '00:00:000');
 });
 
 test('時刻の読み取り', () => {
   assert.strictEqual(C.parseTime('52:39'), 3159);
+  assert.strictEqual(C.parseTime('52:39:120'), 3159.12);
+  assert.strictEqual(C.parseTime('00:05:000'), 5);
   assert.strictEqual(C.parseTime('1:02:15'), 3735);
+  assert.strictEqual(C.parseTime('1:02:15:480'), 3735.48);
+  assert.strictEqual(C.parseTime('５２：３９：１２０'), 3159.12);
   assert.strictEqual(C.parseTime('７５'), 75);
   assert.strictEqual(C.parseTime('1:75'), null);
+  assert.strictEqual(C.parseTime('52:39:1200'), null);
+  assert.strictEqual(C.parseTime('1:02:15:48'), null);
+  assert.strictEqual(C.parseTime('52:60:000'), null);
   assert.strictEqual(C.parseTime('abc'), null);
+});
+
+test('表示した時刻を読み取ると、ミリ秒まで同じに戻る', () => {
+  for (const sec of [0, 0.001, 3159.12, 3599.999, 3735.48, 5400.25]) {
+    assert.strictEqual(C.formatTime(C.parseTime(C.formatTime(sec))), C.formatTime(sec));
+  }
 });
 
 test('タイトルは押した順に「チーム名＋名前」をつなげる', () => {
