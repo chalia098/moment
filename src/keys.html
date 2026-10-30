@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'">
+  <title>キー表示</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { overflow: auto; background: var(--surface); }
+    .keys { padding: 12px 14px 14px; }
+    .group + .group { margin-top: 12px; }
+    .group-title { color: var(--text-3); font-size: 11.5px; margin: 0 0 6px; }
+    .item { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+    .item .kbd { min-width: 30px; }
+    .item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item .team-line { width: 3px; height: 16px; border-radius: 2px; background: var(--team-none); flex: none; }
+    .item.a .team-line { background: var(--team-a); }
+    .item.b .team-line { background: var(--team-b); }
+  </style>
+</head>
+<body>
+  <div class="keys" id="keys"></div>
+  <script src="keys.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; media-src 'self' file: blob:; font-src 'self' file:">
+  <title>Moment</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-new" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+      <symbol id="i-merge" viewBox="0 0 20 20"><rect x="2.5" y="6" width="6.5" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="6" width="6.5" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 10h2" stroke="currentColor" stroke-width="1.5"/></symbol>
+      <symbol id="i-log" viewBox="0 0 20 20"><path d="M4 5.5h12M4 10h12M4 14.5h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.8v2.1M10 15.1v2.1M2.8 10h2.1M15.1 10h2.1M4.9 4.9l1.5 1.5M13.6 13.6l1.5 1.5M4.9 15.1l1.5-1.5M13.6 6.4l1.5-1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-back" viewBox="0 0 20 20"><path d="M9.5 5 3.5 10l6 5V5Zm7 0-6 5 6 5V5Z" fill="currentColor"/></symbol>
+      <symbol id="i-fwd" viewBox="0 0 20 20"><path d="M10.5 5l6 5-6 5V5Zm-7 0 6 5-6 5V5Z" fill="currentColor"/></symbol>
+      <symbol id="i-play" viewBox="0 0 20 20"><path d="M6 4.2v11.6L15.5 10 6 4.2Z" fill="currentColor"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 20 20"><rect x="5.2" y="4.5" width="3.3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3.3" height="11" rx="1" fill="currentColor"/></symbol>
+      <symbol id="i-keys" viewBox="0 0 20 20"><rect x="2.5" y="5.5" width="15" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 8.5h1M9.5 8.5h1M13.5 8.5h1M6.5 12h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-drag" viewBox="0 0 20 20"><circle cx="7.5" cy="6" r="1.2" fill="currentColor"/><circle cx="12.5" cy="6" r="1.2" fill="currentColor"/><circle cx="7.5" cy="10" r="1.2" fill="currentColor"/><circle cx="12.5" cy="10" r="1.2" fill="currentColor"/><circle cx="7.5" cy="14" r="1.2" fill="currentColor"/><circle cx="12.5" cy="14" r="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-x" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- 起動画面 -->
+  <div id="launcher" class="view">
+    <nav class="rail" aria-label="メニュー">
+      <div class="rail-app"><img src="../build/icon.png" alt=""><span>Moment</span></div>
+      <button class="rail-item" data-pane="new"><svg><use href="#i-new"/></svg><span>新しく始める</span></button>
+      <button class="rail-item" data-pane="merge"><svg><use href="#i-merge"/></svg><span>動画を結合</span></button>
+      <button class="rail-item" data-pane="logs"><svg><use href="#i-log"/></svg><span>作業ログ</span></button>
+      <button class="rail-item" data-pane="settings"><svg><use href="#i-gear"/></svg><span>設定</span></button>
+    </nav>
+    <main class="pane-host">
+      <section class="pane" id="pane-logs" hidden>
+        <header class="pane-head">
+          <h1>作業ログ</h1>
+          <button class="btn" id="importLog">作業ログを読み込む</button>
+        </header>
+        <div id="logList" class="log-list"></div>
+      </section>
+
+      <section class="pane" id="pane-new" hidden>
+        <header class="pane-head"><h1>新しく始める</h1></header>
+        <div id="newStep"></div>
+      </section>
+
+      <section class="pane" id="pane-merge" hidden>
+        <header class="pane-head"><h1>動画を結合</h1></header>
+        <p class="lead">前半・後半などに分かれた動画を、1本の動画にまとめます。</p>
+        <div id="mergeBody"></div>
+      </section>
+
+      <section class="pane" id="pane-settings" hidden>
+        <header class="pane-head"><h1>設定</h1></header>
+        <div id="settingsContent"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 作業画面 -->
+  <div id="work" class="view" hidden>
+    <div class="stage" id="stage">
+      <video id="video" preload="auto" playsinline></video>
+      <div class="edge" id="splitter" role="separator" aria-orientation="horizontal" aria-label="映像とタグ一覧の高さ"></div>
+    </div>
+    <div class="bar" id="bar">
+      <button class="icon-btn" id="toLog" title="作業ログに戻る" aria-label="作業ログに戻る"><svg><use href="#i-log"/></svg></button>
+      <span class="bar-sep"></span>
+      <button class="icon-btn" id="btnBack" title="3秒戻る" aria-label="3秒戻る"><svg><use href="#i-back"/></svg></button>
+      <button class="icon-btn play" id="btnPlay" title="再生" aria-label="再生"><svg><use href="#i-play"/></svg></button>
+      <button class="icon-btn" id="btnFwd" title="3秒進む" aria-label="3秒進む"><svg><use href="#i-fwd"/></svg></button>
+      <button class="speed" id="btnSpeed" title="速度" aria-haspopup="menu">1倍</button>
+      <span class="clock" id="clock">0:00 / 0:00</span>
+      <div class="seek" id="seek" role="slider" aria-label="再生位置" tabindex="-1"><div class="seek-track"><div class="seek-fill" id="seekFill"></div></div><div class="seek-thumb" id="seekThumb"></div></div>
+      <div class="rec" id="rec"><span class="rec-dot"></span><span class="rec-time" id="recTime"></span></div>
+      <button class="icon-btn" id="btnKeys" title="キー表示" aria-label="キー表示"><svg><use href="#i-keys"/></svg></button>
+    </div>
+    <div class="list" id="list">
+      <div class="list-head">
+        <label class="check"><input type="checkbox" id="checkAll" aria-label="表示中をすべてチェック"></label>
+        <select id="sortSel" aria-label="並び順"></select>
+        <select id="filterSel" aria-label="絞り込み"></select>
+        <input type="search" id="memoSearch" placeholder="メモを検索" aria-label="メモを検索">
+        <span class="spacer"></span>
+        <span class="count" id="rowCount"></span>
+        <button class="btn primary" id="btnExport" disabled>ダウンロード</button>
+      </div>
+      <div class="rows" id="rows" role="list"></div>
+    </div>
+  </div>
+
+  <div class="sheet-backdrop" id="sheet" hidden>
+    <div class="sheet" id="sheetBody" role="dialog" aria-modal="true"></div>
+  </div>
+  <div class="popover" id="popover" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="lib/core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

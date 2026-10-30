@@ -1,0 +1,19 @@
+{
+  "name": "moment",
+  "productName": "Moment",
+  "version": "2.0.0",
+  "description": "ハンドボールの試合映像をキー操作でタグ付けして、シーンごとにダウンロードするアプリ",
+  "main": "main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "node scripts/build-mac.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "devDependencies": {
+    "electron": "44.5.0"
+  }
+}
